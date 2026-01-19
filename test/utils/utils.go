@@ -32,10 +32,6 @@ const (
 	defaultKindCluster = "kind"
 )
 
-func warnError(err error) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
-}
-
 func Run(cmd *exec.Cmd) (string, error) {
 	dir, _ := GetProjectDir()
 	cmd.Dir = dir
