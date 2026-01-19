@@ -78,3 +78,28 @@ func FormatManagedLabels(keys []string) string {
 	sort.Strings(sorted)
 	return strings.Join(sorted, ",")
 }
+
+// FailedLabel represents a label that could not be applied.
+type FailedLabel struct {
+	Key    string
+	Reason string
+}
+
+// ClassifyLabels separates labels into applied and failed based on protection rules.
+func ClassifyLabels(
+	specLabels map[string]string,
+	protectedPrefixes []string,
+) (applied []string, failed []FailedLabel) {
+	for k := range specLabels {
+		if IsProtected(k, protectedPrefixes) {
+			failed = append(failed, FailedLabel{
+				Key:    k,
+				Reason: "Label is protected (reserved prefix)",
+			})
+		} else {
+			applied = append(applied, k)
+		}
+	}
+	sort.Strings(applied)
+	return applied, failed
+}

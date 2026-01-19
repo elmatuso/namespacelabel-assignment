@@ -158,3 +158,60 @@ func TestFormatManagedLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyLabels(t *testing.T) {
+	protectedPrefixes := []string{"kubernetes.io/", "k8s.io/"}
+
+	tests := []struct {
+		name            string
+		specLabels      map[string]string
+		expectedApplied []string
+		expectedFailed  int
+	}{
+		{
+			name:            "all labels allowed",
+			specLabels:      map[string]string{"app": "test", "env": "prod"},
+			expectedApplied: []string{"app", "env"},
+			expectedFailed:  0,
+		},
+		{
+			name:            "all labels protected",
+			specLabels:      map[string]string{"kubernetes.io/name": "test"},
+			expectedApplied: []string{},
+			expectedFailed:  1,
+		},
+		{
+			name:            "mixed labels",
+			specLabels:      map[string]string{"app": "test", "kubernetes.io/name": "blocked"},
+			expectedApplied: []string{"app"},
+			expectedFailed:  1,
+		},
+		{
+			name:            "empty labels",
+			specLabels:      map[string]string{},
+			expectedApplied: []string{},
+			expectedFailed:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applied, failed := ClassifyLabels(tt.specLabels, protectedPrefixes)
+
+			if len(applied) != len(tt.expectedApplied) {
+				t.Errorf("expected %d applied labels, got %d", len(tt.expectedApplied), len(applied))
+			}
+
+			if len(failed) != tt.expectedFailed {
+				t.Errorf("expected %d failed labels, got %d", tt.expectedFailed, len(failed))
+			}
+
+			// Verify failed labels have correct reason
+			for _, f := range failed {
+				if f.Reason == "" {
+					t.Error("failed label should have a reason")
+				}
+			}
+		})
+	}
+}

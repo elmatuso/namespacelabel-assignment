@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -208,10 +207,10 @@ func (r *NamespaceLabelReconciler) updateSingleStatus(
 	status metav1.ConditionStatus,
 	reason, message string,
 ) error {
-	appliedLabels, failedLabels := r.classifyLabels(item.Spec.Labels)
+	appliedLabels, failedLabels := labels.ClassifyLabels(item.Spec.Labels, r.ProtectedPrefixes)
 
 	item.Status.AppliedLabels = appliedLabels
-	item.Status.FailedLabels = failedLabels
+	item.Status.FailedLabels = convertFailedLabels(failedLabels)
 
 	meta.SetStatusCondition(&item.Status.Conditions, metav1.Condition{
 		Type:    ConditionTypeApplied,
@@ -223,22 +222,16 @@ func (r *NamespaceLabelReconciler) updateSingleStatus(
 	return r.Status().Update(ctx, item)
 }
 
-// classifyLabels separates labels into applied and failed based on protection rules.
-func (r *NamespaceLabelReconciler) classifyLabels(
-	specLabels map[string]string,
-) (applied []string, failed []namespacelabelv1alpha1.FailedLabel) {
-	for k := range specLabels {
-		if labels.IsProtected(k, r.ProtectedPrefixes) {
-			failed = append(failed, namespacelabelv1alpha1.FailedLabel{
-				Key:    k,
-				Reason: "Label is protected (reserved prefix)",
-			})
-		} else {
-			applied = append(applied, k)
+// convertFailedLabels converts labels.FailedLabel to the API type.
+func convertFailedLabels(failed []labels.FailedLabel) []namespacelabelv1alpha1.FailedLabel {
+	result := make([]namespacelabelv1alpha1.FailedLabel, len(failed))
+	for i, f := range failed {
+		result[i] = namespacelabelv1alpha1.FailedLabel{
+			Key:    f.Key,
+			Reason: f.Reason,
 		}
 	}
-	sort.Strings(applied)
-	return applied, failed
+	return result
 }
 
 // SetupWithManager sets up the controller with the Manager.
