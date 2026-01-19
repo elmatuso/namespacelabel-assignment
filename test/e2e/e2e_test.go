@@ -68,7 +68,7 @@ var _ = Describe("Manager", Ordered, func() {
 	// and deleting the namespace.
 	AfterAll(func() {
 		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
+		cmd := exec.Command("make", "undeploy")
 		_, _ = utils.Run(cmd)
 
 		By("uninstalling CRDs")
