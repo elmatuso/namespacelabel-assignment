@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,18 +32,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	namespacelabelv1alpha1 "namespacelabel.dana.io/api/v1alpha1"
+	"namespacelabel.dana.io/internal/labels"
 )
 
 const (
-	// Condition types
 	ConditionTypeApplied = "Applied"
-
-	// Reasons
-	ReasonSucceeded = "Succeeded"
-	ReasonFailed    = "Failed"
+	ReasonSucceeded      = "Succeeded"
+	ReasonFailed         = "Failed"
 )
 
-// NamespaceLabelReconciler reconciles a NamespaceLabel object
+// NamespaceLabelReconciler reconciles a NamespaceLabel object.
 type NamespaceLabelReconciler struct {
 	client.Client
 	Scheme                  *runtime.Scheme
@@ -56,144 +53,192 @@ type NamespaceLabelReconciler struct {
 // +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;patch
 
-// Reconcile is the main reconciliation loop which aims to move the current state of the cluster closer to the desired state.
+// Reconcile synchronizes labels from NamespaceLabel CRs to the parent Namespace.
 func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	var nlList namespacelabelv1alpha1.NamespaceLabelList
-	if err := r.List(ctx, &nlList, client.InNamespace(req.Namespace)); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	nlList, err := r.fetchNamespaceLabels(ctx, req.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
-	var ns corev1.Namespace
-	if err := r.Get(ctx, client.ObjectKey{Name: req.Namespace}, &ns); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	ns, err := r.fetchNamespace(ctx, req.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	nsOriginal := ns.DeepCopy()
+	desiredLabels := labels.CalculateDesiredLabels(nlList.Items)
 
-	desiredLabels := calculateDesiredLabels(nlList.Items)
+	changed := r.syncLabels(ns, desiredLabels)
 
-	managedLabelsStr := ns.Annotations[r.ManagedLabelsAnnotation]
-	managedLabelsKeys := make(map[string]struct{})
-	if managedLabelsStr != "" {
-		for _, k := range strings.Split(managedLabelsStr, ",") {
-			managedLabelsKeys[k] = struct{}{}
+	if changed {
+		l.Info("Syncing labels to namespace", "namespace", ns.Name)
+		if err := r.patchNamespace(ctx, ns, nsOriginal); err != nil {
+			l.Error(err, "unable to patch Namespace labels")
+			r.updateAllStatuses(ctx, nlList.Items, metav1.ConditionFalse, ReasonFailed, "Failed to patch namespace")
+			return ctrl.Result{}, err
 		}
 	}
 
-	changed := false
+	r.updateAllStatuses(ctx, nlList.Items, metav1.ConditionTrue, ReasonSucceeded, "Labels synced successfully")
+	return ctrl.Result{}, nil
+}
+
+// fetchNamespaceLabels retrieves all NamespaceLabel CRs in the given namespace.
+func (r *NamespaceLabelReconciler) fetchNamespaceLabels(
+	ctx context.Context,
+	namespace string,
+) (*namespacelabelv1alpha1.NamespaceLabelList, error) {
+	var nlList namespacelabelv1alpha1.NamespaceLabelList
+	if err := r.List(ctx, &nlList, client.InNamespace(namespace)); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	return &nlList, nil
+}
+
+// fetchNamespace retrieves the Namespace object by name.
+func (r *NamespaceLabelReconciler) fetchNamespace(ctx context.Context, name string) (*corev1.Namespace, error) {
+	var ns corev1.Namespace
+	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	return &ns, nil
+}
+
+// syncLabels applies desired labels to the namespace and removes stale ones.
+// Returns true if any changes were made.
+func (r *NamespaceLabelReconciler) syncLabels(ns *corev1.Namespace, desiredLabels map[string]string) bool {
 	if ns.Labels == nil {
 		ns.Labels = make(map[string]string)
 	}
+	if ns.Annotations == nil {
+		ns.Annotations = make(map[string]string)
+	}
 
-	for k := range managedLabelsKeys {
-		if _, ok := desiredLabels[k]; !ok {
-			if !r.isProtected(k) {
+	managedKeys := labels.ParseManagedLabels(ns.Annotations[r.ManagedLabelsAnnotation])
+
+	changed := r.removeStaleLabels(ns, managedKeys, desiredLabels)
+	changed = r.applyDesiredLabels(ns, desiredLabels) || changed
+	changed = r.updateManagedAnnotation(ns, desiredLabels) || changed
+
+	return changed
+}
+
+// removeStaleLabels removes labels that were previously managed but are no longer desired.
+func (r *NamespaceLabelReconciler) removeStaleLabels(
+	ns *corev1.Namespace,
+	managedKeys map[string]struct{},
+	desiredLabels map[string]string,
+) bool {
+	changed := false
+	for k := range managedKeys {
+		if _, stillDesired := desiredLabels[k]; !stillDesired {
+			if !labels.IsProtected(k, r.ProtectedPrefixes) {
 				delete(ns.Labels, k)
 				changed = true
 			}
 		}
 	}
+	return changed
+}
 
-	newManagedKeys := []string{}
+// applyDesiredLabels adds or updates labels on the namespace.
+func (r *NamespaceLabelReconciler) applyDesiredLabels(ns *corev1.Namespace, desiredLabels map[string]string) bool {
+	changed := false
 	for k, v := range desiredLabels {
-		if !r.isProtected(k) {
+		if !labels.IsProtected(k, r.ProtectedPrefixes) {
 			if ns.Labels[k] != v {
 				ns.Labels[k] = v
 				changed = true
 			}
+		}
+	}
+	return changed
+}
+
+// updateManagedAnnotation updates the annotation tracking which labels are managed.
+func (r *NamespaceLabelReconciler) updateManagedAnnotation(
+	ns *corev1.Namespace,
+	desiredLabels map[string]string,
+) bool {
+	var newManagedKeys []string
+	for k := range desiredLabels {
+		if !labels.IsProtected(k, r.ProtectedPrefixes) {
 			newManagedKeys = append(newManagedKeys, k)
 		}
 	}
 
-	sort.Strings(newManagedKeys)
-	newManagedLabelsStr := strings.Join(newManagedKeys, ",")
-	if ns.Annotations == nil {
-		ns.Annotations = make(map[string]string)
-	}
-	if ns.Annotations[r.ManagedLabelsAnnotation] != newManagedLabelsStr {
-		ns.Annotations[r.ManagedLabelsAnnotation] = newManagedLabelsStr
-		changed = true
-	}
-
-	if changed {
-		l.Info("Syncing labels to namespace", "namespace", ns.Name, "labels", newManagedLabelsStr)
-		patch := client.MergeFrom(nsOriginal)
-		if err := r.Patch(ctx, &ns, patch); err != nil {
-			l.Error(err, "unable to patch Namespace labels")
-			r.updateStatus(ctx, nlList.Items, metav1.ConditionFalse, ReasonFailed, "Failed to patch namespace")
-			return ctrl.Result{}, err
-		}
-	}
-
-	r.updateStatus(ctx, nlList.Items, metav1.ConditionTrue, ReasonSucceeded, "Labels synced successfully")
-	return ctrl.Result{}, nil
-}
-
-// updateStatus updates the status of each NamespaceLabel object in the provided list.
-func (r *NamespaceLabelReconciler) updateStatus(ctx context.Context, items []namespacelabelv1alpha1.NamespaceLabel, status metav1.ConditionStatus, reason, message string) {
-	l := log.FromContext(ctx)
-	for _, item := range items {
-		// Calculate applied and failed labels for this specific CR
-		var appliedLabels []string
-		var failedLabels []namespacelabelv1alpha1.FailedLabel
-
-		for k := range item.Spec.Labels {
-			if r.isProtected(k) {
-				failedLabels = append(failedLabels, namespacelabelv1alpha1.FailedLabel{
-					Key:    k,
-					Reason: "Label is protected (reserved prefix)",
-				})
-			} else {
-				appliedLabels = append(appliedLabels, k)
-			}
-		}
-		sort.Strings(appliedLabels)
-
-		item.Status.AppliedLabels = appliedLabels
-		item.Status.FailedLabels = failedLabels
-
-		meta.SetStatusCondition(&item.Status.Conditions, metav1.Condition{
-			Type:    ConditionTypeApplied,
-			Status:  status,
-			Reason:  reason,
-			Message: message,
-		})
-
-		if err := r.Status().Update(ctx, &item); err != nil {
-			l.Error(err, "unable to update NamespaceLabel status", "name", item.Name)
-		}
-	}
-}
-
-// calculateDesiredLabels merges labels from all NamespaceLabel objects in a namespace.
-// It uses a deterministic sort order to handle conflicts.
-func calculateDesiredLabels(items []namespacelabelv1alpha1.NamespaceLabel) map[string]string {
-	// Sort items by name in descending order (e.g., "z", "b", "a").
-	// Since "a" comes last in a descending sort, its labels will overwrite
-	// any labels set by "b" or "z" when we iterate through the list.
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].Name > items[j].Name
-	})
-
-	desired := make(map[string]string)
-	for _, item := range items {
-		for k, v := range item.Spec.Labels {
-			desired[k] = v
-		}
-	}
-	return desired
-}
-
-// isProtected checks if a label key starts with any of the protected prefixes.
-func (r *NamespaceLabelReconciler) isProtected(key string) bool {
-	for _, p := range r.ProtectedPrefixes {
-		if strings.HasPrefix(key, p) {
-			return true
-		}
+	newAnnotation := labels.FormatManagedLabels(newManagedKeys)
+	if ns.Annotations[r.ManagedLabelsAnnotation] != newAnnotation {
+		ns.Annotations[r.ManagedLabelsAnnotation] = newAnnotation
+		return true
 	}
 	return false
+}
+
+// patchNamespace applies changes to the namespace using a merge patch.
+func (r *NamespaceLabelReconciler) patchNamespace(
+	ctx context.Context,
+	ns *corev1.Namespace,
+	original *corev1.Namespace,
+) error {
+	return r.Patch(ctx, ns, client.MergeFrom(original))
+}
+
+// updateAllStatuses updates the status of all NamespaceLabel CRs.
+func (r *NamespaceLabelReconciler) updateAllStatuses(
+	ctx context.Context,
+	items []namespacelabelv1alpha1.NamespaceLabel,
+	status metav1.ConditionStatus,
+	reason, message string,
+) {
+	l := log.FromContext(ctx)
+	for i := range items {
+		if err := r.updateSingleStatus(ctx, &items[i], status, reason, message); err != nil {
+			l.Error(err, "unable to update NamespaceLabel status", "name", items[i].Name)
+		}
+	}
+}
+
+// updateSingleStatus updates the status of a single NamespaceLabel CR.
+func (r *NamespaceLabelReconciler) updateSingleStatus(
+	ctx context.Context,
+	item *namespacelabelv1alpha1.NamespaceLabel,
+	status metav1.ConditionStatus,
+	reason, message string,
+) error {
+	appliedLabels, failedLabels := r.classifyLabels(item.Spec.Labels)
+
+	item.Status.AppliedLabels = appliedLabels
+	item.Status.FailedLabels = failedLabels
+
+	meta.SetStatusCondition(&item.Status.Conditions, metav1.Condition{
+		Type:    ConditionTypeApplied,
+		Status:  status,
+		Reason:  reason,
+		Message: message,
+	})
+
+	return r.Status().Update(ctx, item)
+}
+
+// classifyLabels separates labels into applied and failed based on protection rules.
+func (r *NamespaceLabelReconciler) classifyLabels(
+	specLabels map[string]string,
+) (applied []string, failed []namespacelabelv1alpha1.FailedLabel) {
+	for k := range specLabels {
+		if labels.IsProtected(k, r.ProtectedPrefixes) {
+			failed = append(failed, namespacelabelv1alpha1.FailedLabel{
+				Key:    k,
+				Reason: "Label is protected (reserved prefix)",
+			})
+		} else {
+			applied = append(applied, k)
+		}
+	}
+	sort.Strings(applied)
+	return applied, failed
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -202,22 +247,29 @@ func (r *NamespaceLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&namespacelabelv1alpha1.NamespaceLabel{}).
 		Watches(
 			&corev1.Namespace{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				var nlList namespacelabelv1alpha1.NamespaceLabelList
-				if err := r.List(ctx, &nlList, client.InNamespace(obj.GetName())); err != nil {
-					return nil
-				}
-				var requests []reconcile.Request
-				for _, nl := range nlList.Items {
-					requests = append(requests, reconcile.Request{
-						NamespacedName: types.NamespacedName{
-							Name:      nl.Name,
-							Namespace: nl.Namespace,
-						},
-					})
-				}
-				return requests
-			}),
+			handler.EnqueueRequestsFromMapFunc(r.findNamespaceLabelsForNamespace),
 		).
 		Complete(r)
+}
+
+// findNamespaceLabelsForNamespace returns reconcile requests for all NamespaceLabel CRs in a namespace.
+func (r *NamespaceLabelReconciler) findNamespaceLabelsForNamespace(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
+	var nlList namespacelabelv1alpha1.NamespaceLabelList
+	if err := r.List(ctx, &nlList, client.InNamespace(obj.GetName())); err != nil {
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(nlList.Items))
+	for _, nl := range nlList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      nl.Name,
+				Namespace: nl.Namespace,
+			},
+		})
+	}
+	return requests
 }
