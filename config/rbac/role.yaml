@@ -12,31 +12,18 @@ rules:
   - get
   - list
   - patch
-  - update
   - watch
 - apiGroups:
   - namespacelabel.dana.io
   resources:
   - namespacelabels
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - namespacelabel.dana.io
-  resources:
-  - namespacelabels/finalizers
-  verbs:
-  - update
 - apiGroups:
   - namespacelabel.dana.io
   resources:
   - namespacelabels/status
   verbs:
-  - get
-  - patch
   - update

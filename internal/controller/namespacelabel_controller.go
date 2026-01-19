@@ -52,10 +52,9 @@ type NamespaceLabelReconciler struct {
 	ManagedLabelsAnnotation string
 }
 
-// +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels,verbs=get;list;watch
+// +kubebuilder:rbac:groups=namespacelabel.dana.io,resources=namespacelabels/status,verbs=update
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;patch
 
 // Reconcile is the main reconciliation loop which aims to move the current state of the cluster closer to the desired state.
 func (r *NamespaceLabelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
