@@ -32,15 +32,13 @@ import (
 	namespacelabelv1alpha1 "namespacelabel.dana.io/api/v1alpha1"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func randString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		b[i] = letters[rng.Intn(len(letters))]
 	}
 	return string(b)
 }

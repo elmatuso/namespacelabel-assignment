@@ -37,15 +37,11 @@ const (
 	defaultTestPollingInterval = time.Second
 )
 
-// Helper functions for e2e tests
-
-// createNamespaceLabel creates a NamespaceLabel CR with the given name, namespace, and labels
 func createNamespaceLabel(name, targetNamespace string, labels map[string]string) error {
 	labelYAML := generateNamespaceLabelYAML(name, targetNamespace, labels)
 	return applyYAML(labelYAML)
 }
 
-// generateNamespaceLabelYAML generates YAML for a NamespaceLabel CR
 func generateNamespaceLabelYAML(name, targetNamespace string, labels map[string]string) string {
 	var labelLines strings.Builder
 	for k, v := range labels {
@@ -53,16 +49,15 @@ func generateNamespaceLabelYAML(name, targetNamespace string, labels map[string]
 	}
 
 	return fmt.Sprintf(`apiVersion: namespacelabel.dana.io/v1alpha1
-kind: NamespaceLabel
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  labels:
-%s`, name, targetNamespace, labelLines.String())
+						kind: NamespaceLabel
+						metadata:
+						name: %s
+						namespace: %s
+						spec:
+						labels:
+						%s`, name, targetNamespace, labelLines.String())
 }
 
-// applyYAML applies the given YAML string to the cluster
 func applyYAML(yaml string) error {
 	cmd := exec.Command("kubectl", "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(yaml)
@@ -70,39 +65,33 @@ func applyYAML(yaml string) error {
 	return err
 }
 
-// deleteNamespaceLabel deletes a NamespaceLabel CR
 func deleteNamespaceLabel(name, targetNamespace string) error {
 	cmd := exec.Command("kubectl", "delete", "namespacelabel", name, "-n", targetNamespace)
 	_, err := utils.Run(cmd)
 	return err
 }
 
-// getNamespaceLabelValue retrieves the value of a specific label from a namespace
 func getNamespaceLabelValue(namespaceName, labelKey string) (string, error) {
 	cmd := exec.Command("kubectl", "get", "namespace", namespaceName,
 		"-o", fmt.Sprintf("jsonpath={.metadata.labels.%s}", escapeJSONPath(labelKey)))
 	return utils.Run(cmd)
 }
 
-// getAllNamespaceLabels retrieves all labels from a namespace as a string
 func getAllNamespaceLabels(namespaceName string) (string, error) {
 	cmd := exec.Command("kubectl", "get", "namespace", namespaceName, "-o", "jsonpath={.metadata.labels}")
 	return utils.Run(cmd)
 }
 
-// getManagedLabelsAnnotation retrieves the managed-labels annotation from a namespace
 func getManagedLabelsAnnotation(namespaceName string) (string, error) {
 	cmd := exec.Command("kubectl", "get", "namespace", namespaceName,
 		"-o", "jsonpath={.metadata.annotations.namespacelabel\\.dana\\.io/managed-labels}")
 	return utils.Run(cmd)
 }
 
-// escapeJSONPath escapes special characters in label keys for JSONPath queries
 func escapeJSONPath(key string) string {
 	return strings.ReplaceAll(key, ".", "\\.")
 }
 
-// verifyNamespaceLabelExists verifies that a label with the expected value exists on the namespace
 func verifyNamespaceLabelExists(namespaceName, labelKey, expectedValue string) {
 	Eventually(func(g Gomega) {
 		value, err := getNamespaceLabelValue(namespaceName, labelKey)
@@ -111,7 +100,6 @@ func verifyNamespaceLabelExists(namespaceName, labelKey, expectedValue string) {
 	}, defaultTestTimeout, defaultTestPollingInterval).Should(Succeed())
 }
 
-// verifyNamespaceLabelNotExists verifies that a label does not exist on the namespace
 func verifyNamespaceLabelNotExists(namespaceName, labelKey string) {
 	Eventually(func(g Gomega) {
 		value, err := getNamespaceLabelValue(namespaceName, labelKey)
@@ -120,7 +108,6 @@ func verifyNamespaceLabelNotExists(namespaceName, labelKey string) {
 	}, defaultTestTimeout, defaultTestPollingInterval).Should(Succeed())
 }
 
-// verifyNamespaceHasLabels verifies that the namespace contains all the specified label keys
 func verifyNamespaceHasLabels(namespaceName string, labelKeys ...string) {
 	Eventually(func(g Gomega) {
 		allLabels, err := getAllNamespaceLabels(namespaceName)
@@ -131,7 +118,6 @@ func verifyNamespaceHasLabels(namespaceName string, labelKeys ...string) {
 	}, defaultTestTimeout, defaultTestPollingInterval).Should(Succeed())
 }
 
-// verifyManagedLabelsAnnotation verifies that the managed-labels annotation contains the expected label keys
 func verifyManagedLabelsAnnotation(namespaceName string, expectedKeys ...string) {
 	Eventually(func(g Gomega) {
 		annotation, err := getManagedLabelsAnnotation(namespaceName)
@@ -142,7 +128,7 @@ func verifyManagedLabelsAnnotation(namespaceName string, expectedKeys ...string)
 	}, defaultTestTimeout, defaultTestPollingInterval).Should(Succeed())
 }
 
-var _ = Describe("Manager", Ordered, func() {
+var _ = Describe("Management of the controller-manager pod and NamespaceLabel Operator Functionality", Ordered, func() {
 	var controllerPodName string
 
 	BeforeAll(func() {
@@ -217,7 +203,7 @@ var _ = Describe("Manager", Ordered, func() {
 	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(time.Second)
 
-	Context("Manager", func() {
+	Context("Management of the controller-manager pod", func() {
 		It("should run successfully", func() {
 			By("validating that the controller-manager pod is running as expected")
 			verifyControllerUp := func(g Gomega) {
@@ -249,7 +235,7 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 
-	Context("NamespaceLabel Operator", func() {
+	Context("NamespaceLabel Operator Functionality", func() {
 		var testNamespace string
 
 		BeforeEach(func() {
@@ -316,7 +302,6 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should handle label conflicts using smallest-name-wins strategy", func() {
 			By("creating two NamespaceLabels with conflicting labels")
 
-			// nl-b should win because 'b' < 'z'
 			labelsB := map[string]string{
 				"conflict": "from-b",
 				"unique-b": "value-b",

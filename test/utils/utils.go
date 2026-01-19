@@ -52,7 +52,6 @@ func Run(cmd *exec.Cmd) (string, error) {
 	return string(output), nil
 }
 
-// LoadImageToKindClusterWithName loads a local docker image to the kind cluster
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := defaultKindCluster
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
@@ -68,8 +67,6 @@ func LoadImageToKindClusterWithName(name string) error {
 	return err
 }
 
-// GetNonEmptyLines converts given command output string into individual objects
-// according to line breakers, and ignores the empty elements in it.
 func GetNonEmptyLines(output string) []string {
 	var res []string
 	elements := strings.Split(output, "\n")
@@ -82,7 +79,6 @@ func GetNonEmptyLines(output string) []string {
 	return res
 }
 
-// GetProjectDir will return the directory where the project is
 func GetProjectDir() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -92,10 +88,7 @@ func GetProjectDir() (string, error) {
 	return wd, nil
 }
 
-// UncommentCode searches for target in the file and remove the comment prefix
-// of the target content. The target content may span multiple lines.
 func UncommentCode(filename, target, prefix string) error {
-	// false positive
 	// nolint:gosec
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -122,7 +115,6 @@ func UncommentCode(filename, target, prefix string) error {
 		if _, err = out.WriteString(strings.TrimPrefix(scanner.Text(), prefix)); err != nil {
 			return fmt.Errorf("failed to write to output: %w", err)
 		}
-		// Avoid writing a newline in case the previous line was the last in target.
 		if !scanner.Scan() {
 			break
 		}
@@ -135,7 +127,6 @@ func UncommentCode(filename, target, prefix string) error {
 		return fmt.Errorf("failed to write to output: %w", err)
 	}
 
-	// false positive
 	// nolint:gosec
 	if err = os.WriteFile(filename, out.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write file %q: %w", filename, err)
