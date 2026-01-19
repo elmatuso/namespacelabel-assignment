@@ -215,3 +215,151 @@ func TestClassifyLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveStaleLabels(t *testing.T) {
+	protectedPrefixes := []string{"kubernetes.io/"}
+
+	tests := []struct {
+		name          string
+		currentLabels map[string]string
+		managedKeys   map[string]struct{}
+		desiredLabels map[string]string
+		wantChanged   bool
+		wantLabels    map[string]string
+	}{
+		{
+			name:          "remove stale label",
+			currentLabels: map[string]string{"old": "value", "keep": "value"},
+			managedKeys:   map[string]struct{}{"old": {}, "keep": {}},
+			desiredLabels: map[string]string{"keep": "value"},
+			wantChanged:   true,
+			wantLabels:    map[string]string{"keep": "value"},
+		},
+		{
+			name:          "no stale labels",
+			currentLabels: map[string]string{"keep": "value"},
+			managedKeys:   map[string]struct{}{"keep": {}},
+			desiredLabels: map[string]string{"keep": "value"},
+			wantChanged:   false,
+			wantLabels:    map[string]string{"keep": "value"},
+		},
+		{
+			name:          "protected label not removed",
+			currentLabels: map[string]string{"kubernetes.io/name": "value"},
+			managedKeys:   map[string]struct{}{"kubernetes.io/name": {}},
+			desiredLabels: map[string]string{},
+			wantChanged:   false,
+			wantLabels:    map[string]string{"kubernetes.io/name": "value"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RemoveStaleLabels(tt.currentLabels, tt.managedKeys, tt.desiredLabels, protectedPrefixes)
+			if got != tt.wantChanged {
+				t.Errorf("RemoveStaleLabels() = %v, want %v", got, tt.wantChanged)
+			}
+			for k, v := range tt.wantLabels {
+				if tt.currentLabels[k] != v {
+					t.Errorf("expected label %s=%s, got %s", k, v, tt.currentLabels[k])
+				}
+			}
+		})
+	}
+}
+
+func TestApplyDesiredLabels(t *testing.T) {
+	protectedPrefixes := []string{"kubernetes.io/"}
+
+	tests := []struct {
+		name          string
+		currentLabels map[string]string
+		desiredLabels map[string]string
+		wantChanged   bool
+		wantLabels    map[string]string
+	}{
+		{
+			name:          "add new label",
+			currentLabels: map[string]string{},
+			desiredLabels: map[string]string{"new": "value"},
+			wantChanged:   true,
+			wantLabels:    map[string]string{"new": "value"},
+		},
+		{
+			name:          "update existing label",
+			currentLabels: map[string]string{"key": "old"},
+			desiredLabels: map[string]string{"key": "new"},
+			wantChanged:   true,
+			wantLabels:    map[string]string{"key": "new"},
+		},
+		{
+			name:          "no change needed",
+			currentLabels: map[string]string{"key": "value"},
+			desiredLabels: map[string]string{"key": "value"},
+			wantChanged:   false,
+			wantLabels:    map[string]string{"key": "value"},
+		},
+		{
+			name:          "protected label not applied",
+			currentLabels: map[string]string{},
+			desiredLabels: map[string]string{"kubernetes.io/name": "value"},
+			wantChanged:   false,
+			wantLabels:    map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ApplyDesiredLabels(tt.currentLabels, tt.desiredLabels, protectedPrefixes)
+			if got != tt.wantChanged {
+				t.Errorf("ApplyDesiredLabels() = %v, want %v", got, tt.wantChanged)
+			}
+		})
+	}
+}
+
+func TestUpdateManagedAnnotation(t *testing.T) {
+	protectedPrefixes := []string{"kubernetes.io/"}
+
+	tests := []struct {
+		name              string
+		currentAnnotation string
+		desiredLabels     map[string]string
+		wantAnnotation    string
+		wantChanged       bool
+	}{
+		{
+			name:              "new annotation",
+			currentAnnotation: "",
+			desiredLabels:     map[string]string{"a": "1", "b": "2"},
+			wantAnnotation:    "a,b",
+			wantChanged:       true,
+		},
+		{
+			name:              "no change",
+			currentAnnotation: "a,b",
+			desiredLabels:     map[string]string{"a": "1", "b": "2"},
+			wantAnnotation:    "a,b",
+			wantChanged:       false,
+		},
+		{
+			name:              "excludes protected",
+			currentAnnotation: "",
+			desiredLabels:     map[string]string{"app": "1", "kubernetes.io/name": "2"},
+			wantAnnotation:    "app",
+			wantChanged:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAnnotation, gotChanged := UpdateManagedAnnotation(tt.currentAnnotation, tt.desiredLabels, protectedPrefixes)
+			if gotAnnotation != tt.wantAnnotation {
+				t.Errorf("UpdateManagedAnnotation() annotation = %v, want %v", gotAnnotation, tt.wantAnnotation)
+			}
+			if gotChanged != tt.wantChanged {
+				t.Errorf("UpdateManagedAnnotation() changed = %v, want %v", gotChanged, tt.wantChanged)
+			}
+		})
+	}
+}

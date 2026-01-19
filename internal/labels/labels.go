@@ -103,3 +103,58 @@ func ClassifyLabels(
 	sort.Strings(applied)
 	return applied, failed
 }
+
+// RemoveStaleLabels removes labels that were previously managed but are no longer desired.
+// Returns true if any changes were made.
+func RemoveStaleLabels(
+	currentLabels map[string]string,
+	managedKeys map[string]struct{},
+	desiredLabels map[string]string,
+	protectedPrefixes []string,
+) bool {
+	changed := false
+	for k := range managedKeys {
+		if _, stillDesired := desiredLabels[k]; !stillDesired {
+			if !IsProtected(k, protectedPrefixes) {
+				delete(currentLabels, k)
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// ApplyDesiredLabels adds or updates labels. Returns true if any changes were made.
+func ApplyDesiredLabels(
+	currentLabels map[string]string,
+	desiredLabels map[string]string,
+	protectedPrefixes []string,
+) bool {
+	changed := false
+	for k, v := range desiredLabels {
+		if !IsProtected(k, protectedPrefixes) {
+			if currentLabels[k] != v {
+				currentLabels[k] = v
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// UpdateManagedAnnotation returns the new annotation value and whether it changed.
+func UpdateManagedAnnotation(
+	currentAnnotation string,
+	desiredLabels map[string]string,
+	protectedPrefixes []string,
+) (newAnnotation string, changed bool) {
+	var newManagedKeys []string
+	for k := range desiredLabels {
+		if !IsProtected(k, protectedPrefixes) {
+			newManagedKeys = append(newManagedKeys, k)
+		}
+	}
+
+	newAnnotation = FormatManagedLabels(newManagedKeys)
+	return newAnnotation, currentAnnotation != newAnnotation
+}

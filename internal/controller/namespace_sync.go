@@ -59,63 +59,20 @@ func (r *NamespaceLabelReconciler) syncLabels(ns *corev1.Namespace, desiredLabel
 
 	managedKeys := labels.ParseManagedLabels(ns.Annotations[r.ManagedLabelsAnnotation])
 
-	changed := r.removeStaleLabels(ns, managedKeys, desiredLabels)
-	changed = r.applyDesiredLabels(ns, desiredLabels) || changed
-	changed = r.updateManagedAnnotation(ns, desiredLabels) || changed
+	changed := labels.RemoveStaleLabels(ns.Labels, managedKeys, desiredLabels, r.ProtectedPrefixes)
+	changed = labels.ApplyDesiredLabels(ns.Labels, desiredLabels, r.ProtectedPrefixes) || changed
 
-	return changed
-}
-
-// removeStaleLabels removes labels that were previously managed but are no longer desired.
-func (r *NamespaceLabelReconciler) removeStaleLabels(
-	ns *corev1.Namespace,
-	managedKeys map[string]struct{},
-	desiredLabels map[string]string,
-) bool {
-	changed := false
-	for k := range managedKeys {
-		if _, stillDesired := desiredLabels[k]; !stillDesired {
-			if !labels.IsProtected(k, r.ProtectedPrefixes) {
-				delete(ns.Labels, k)
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-// applyDesiredLabels adds or updates labels on the namespace.
-func (r *NamespaceLabelReconciler) applyDesiredLabels(ns *corev1.Namespace, desiredLabels map[string]string) bool {
-	changed := false
-	for k, v := range desiredLabels {
-		if !labels.IsProtected(k, r.ProtectedPrefixes) {
-			if ns.Labels[k] != v {
-				ns.Labels[k] = v
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-// updateManagedAnnotation updates the annotation tracking which labels are managed.
-func (r *NamespaceLabelReconciler) updateManagedAnnotation(
-	ns *corev1.Namespace,
-	desiredLabels map[string]string,
-) bool {
-	var newManagedKeys []string
-	for k := range desiredLabels {
-		if !labels.IsProtected(k, r.ProtectedPrefixes) {
-			newManagedKeys = append(newManagedKeys, k)
-		}
-	}
-
-	newAnnotation := labels.FormatManagedLabels(newManagedKeys)
-	if ns.Annotations[r.ManagedLabelsAnnotation] != newAnnotation {
+	newAnnotation, annotationChanged := labels.UpdateManagedAnnotation(
+		ns.Annotations[r.ManagedLabelsAnnotation],
+		desiredLabels,
+		r.ProtectedPrefixes,
+	)
+	if annotationChanged {
 		ns.Annotations[r.ManagedLabelsAnnotation] = newAnnotation
-		return true
+		changed = true
 	}
-	return false
+
+	return changed
 }
 
 // patchNamespace applies changes to the namespace using a merge patch.
