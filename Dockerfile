@@ -10,7 +10,6 @@ COPY go.sum go.sum
 
 RUN go mod download
 
-#
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./cmd/main.go
