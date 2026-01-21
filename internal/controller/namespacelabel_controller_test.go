@@ -177,6 +177,185 @@ var _ = Describe("NamespaceLabel Controller", func() {
 		})
 	})
 
+	Context("NamespaceLabel Lifecycle", func() {
+		It("adds labels to namespace when NamespaceLabel is created", func() {
+			const nsName = "lifecycle-create-ns"
+
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: nsName},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+			// Verify namespace has no custom labels initially
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, ns)).To(Succeed())
+			Expect(ns.Labels).NotTo(HaveKey("environment"))
+
+			// Create NamespaceLabel
+			nl := &namespacelabelv1alpha1.NamespaceLabel{
+				ObjectMeta: metav1.ObjectMeta{Name: "env-label", Namespace: nsName},
+				Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+					Labels: map[string]string{"environment": "production"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, nl)).To(Succeed())
+
+			// Reconcile
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "env-label", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify label was added
+			updatedNS := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("environment", "production"))
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, nl)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+		})
+
+		It("adds multiple labels from a single NamespaceLabel", func() {
+			const nsName = "lifecycle-multi-label-ns"
+
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: nsName},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+			nl := &namespacelabelv1alpha1.NamespaceLabel{
+				ObjectMeta: metav1.ObjectMeta{Name: "multi-label-nl", Namespace: nsName},
+				Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+					Labels: map[string]string{
+						"team":        "platform",
+						"cost-center": "engineering",
+						"tier":        "backend",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, nl)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "multi-label-nl", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedNS := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("team", "platform"))
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("cost-center", "engineering"))
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("tier", "backend"))
+
+			// Verify status shows all applied labels
+			updatedNL := &namespacelabelv1alpha1.NamespaceLabel{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "multi-label-nl", Namespace: nsName}, updatedNL)).To(Succeed())
+			Expect(updatedNL.Status.AppliedLabels).To(HaveLen(3))
+			Expect(updatedNL.Status.AppliedLabels).To(ContainElements("team", "cost-center", "tier"))
+
+			Expect(k8sClient.Delete(ctx, nl)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+		})
+
+		It("updates namespace labels when NamespaceLabel spec changes", func() {
+			const nsName = "lifecycle-update-ns"
+
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: nsName},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+			nl := &namespacelabelv1alpha1.NamespaceLabel{
+				ObjectMeta: metav1.ObjectMeta{Name: "updatable-nl", Namespace: nsName},
+				Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+					Labels: map[string]string{"version": "v1"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, nl)).To(Succeed())
+
+			// First reconcile
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "updatable-nl", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedNS := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("version", "v1"))
+
+			// Update the NamespaceLabel
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "updatable-nl", Namespace: nsName}, nl)).To(Succeed())
+			nl.Spec.Labels["version"] = "v2"
+			nl.Spec.Labels["new-label"] = "added"
+			Expect(k8sClient.Update(ctx, nl)).To(Succeed())
+
+			// Second reconcile
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "updatable-nl", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("version", "v2"))
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("new-label", "added"))
+
+			Expect(k8sClient.Delete(ctx, nl)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+		})
+
+		It("removes labels from namespace when removed from NamespaceLabel spec", func() {
+			const nsName = "lifecycle-remove-label-ns"
+
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: nsName},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+			nl := &namespacelabelv1alpha1.NamespaceLabel{
+				ObjectMeta: metav1.ObjectMeta{Name: "shrinking-nl", Namespace: nsName},
+				Spec: namespacelabelv1alpha1.NamespaceLabelSpec{
+					Labels: map[string]string{
+						"keep-me":   "yes",
+						"remove-me": "soon",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, nl)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "shrinking-nl", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedNS := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKey("remove-me"))
+
+			// Remove one label from spec
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "shrinking-nl", Namespace: nsName}, nl)).To(Succeed())
+			delete(nl.Spec.Labels, "remove-me")
+			Expect(k8sClient.Update(ctx, nl)).To(Succeed())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "shrinking-nl", Namespace: nsName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, updatedNS)).To(Succeed())
+			Expect(updatedNS.Labels).To(HaveKeyWithValue("keep-me", "yes"))
+			Expect(updatedNS.Labels).NotTo(HaveKey("remove-me"))
+
+			Expect(k8sClient.Delete(ctx, nl)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+		})
+
+		It("handles reconcile for non-existent NamespaceLabel gracefully", func() {
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "does-not-exist", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 	Context("Multi-Resource Conflict Resolution", func() {
 		It("merges labels from multiple NamespaceLabel resources", func() {
 			const nsName = "merge-test-ns"
