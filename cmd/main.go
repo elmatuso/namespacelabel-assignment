@@ -56,15 +56,12 @@ func init() {
 func main() {
 	var enableLeaderElection bool
 	var probeAddr string
-	var secureMetrics bool
 	var protectedPrefixes string
 	var managedLabelsAnnotation string
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.BoolVar(&secureMetrics, "metrics-secure", true,
-		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.StringVar(&protectedPrefixes, "protected-prefixes", "kubernetes.io/,k8s.io/",
 		"Comma-separated list of protected label prefixes.")
 	flag.StringVar(&managedLabelsAnnotation, "managed-labels-annotation", "namespacelabel.dana.io/managed-labels",
@@ -75,7 +72,6 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	// Allow overrides via environment variables
 	if env := os.Getenv("PROTECTED_PREFIXES"); env != "" {
 		protectedPrefixes = env
 	}

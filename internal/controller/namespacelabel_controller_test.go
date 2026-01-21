@@ -49,7 +49,7 @@ var _ = Describe("NamespaceLabel Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		namespacelabel := &namespacelabelv1alpha1.NamespaceLabel{}
 
@@ -73,7 +73,6 @@ var _ = Describe("NamespaceLabel Controller", func() {
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &namespacelabelv1alpha1.NamespaceLabel{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
