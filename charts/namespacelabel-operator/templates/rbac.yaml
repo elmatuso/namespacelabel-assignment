@@ -1,0 +1,58 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "namespacelabel-operator.fullname" . }}-manager-role
+  labels:
+    {{- include "namespacelabel-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - namespacelabel.dana.io
+  resources:
+  - namespacelabels
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - namespacelabel.dana.io
+  resources:
+  - namespacelabels/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - namespacelabel.dana.io
+  resources:
+  - namespacelabels/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "namespacelabel-operator.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "namespacelabel-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "namespacelabel-operator.fullname" . }}-manager-role
+subjects:
+- kind: ServiceAccount
+  name: {{ include "namespacelabel-operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}

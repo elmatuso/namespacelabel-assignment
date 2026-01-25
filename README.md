@@ -38,6 +38,7 @@ spec:
 - Can you create/update/delete labels?
 - Can you deal with more than one NamespaceLabel object per Namespace? If not, solve it.
 - Namespaces usually have [labels for management](https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/), can you protect those labels?
+  - **Implemented**: The operator has a configurable list of `protectedPrefixes` (defaulting to `kubernetes.io/,k8s.io/`). Any labels starting with these prefixes will not be touched by the operator and will be reported as `failedLabels` in the CR status.
 - Tenant is not able to consume CRDs by default, what needs to be done to let tenant use the NamespaceLabel CRD?
 - Code should be documented, tested (unit testing) and well-written.
 
@@ -48,6 +49,22 @@ This repo contains a go project you can fork it and use it as a template, also y
 - [Kubebuilder](https://book.kubebuilder.io) for creating the operator and crd template
 - [Operator-SDK](https://sdk.operatorframework.io/docs/) for documentation about controllers and syntax
 - [Ginkgo](https://onsi.github.io/ginkgo/) for testing
+
+## Helm Chart
+
+A Helm chart is provided in the `charts/namespacelabel-operator` directory. You can install it using:
+
+```bash
+helm install namespacelabel-operator ./charts/namespacelabel-operator
+```
+
+The chart supports configuring protected prefixes and the managed labels annotation via `values.yaml`:
+
+```yaml
+config:
+  protectedPrefixes: "kubernetes.io/,k8s.io/"
+  managedLabelsAnnotation: "namespacelabel.dana.io/managed-labels"
+```
 
 ## Bonus
 - Use GitHub actions to protect the main branch and test every pull request automatically

@@ -1,0 +1,12 @@
+# Adds namespace to all resources.
+namespace: namespacelabel-assignment-system
+
+namePrefix: namespacelabel-assignment-
+
+
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+patches:
